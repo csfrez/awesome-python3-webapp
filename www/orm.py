@@ -7,15 +7,21 @@ import asyncio, logging
 
 import aiomysql
 
+
+logging.basicConfig(level=logging.DEBUG)
+
+
 def log(sql, args=()):
     logging.info('SQL: %s' % sql)
+    logging.info('ARGS: %s' % str(args))
+
 
 @asyncio.coroutine
 def create_pool(loop, **kw):
-    logging.info('create database connection pool...')
+    logging.warning('create database connection pool...')
     global __pool
     __pool = yield from aiomysql.create_pool(
-        host=kw.get('host', 'localhost'),
+        host=kw.get('host', '10.96.2.119'),
         port=kw.get('port', 3306),
         user=kw['user'],
         password=kw['password'],
@@ -44,7 +50,7 @@ def select(sql, args, size=None):
 
 @asyncio.coroutine
 def execute(sql, args, autocommit=True):
-    log(sql)
+    log(sql, args)
     with (yield from __pool) as conn:
         if not autocommit:
             yield from conn.begin()
@@ -106,10 +112,11 @@ class TextField(Field):
 class ModelMetaclass(type):
 
     def __new__(cls, name, bases, attrs):
+        logging.info('  found name: %s ' % (name, ))
         if name=='Model':
             return type.__new__(cls, name, bases, attrs)
         tableName = attrs.get('__table__', None) or name
-        logging.info('found model: %s (table: %s)' % (name, tableName))
+        logging.info('  found model: %s (table: %s)' % (name, tableName))
         mappings = dict()
         fields = []
         primaryKey = None
@@ -120,12 +127,12 @@ class ModelMetaclass(type):
                 if v.primary_key:
                     # 找到主键:
                     if primaryKey:
-                        raise StandardError('Duplicate primary key for field: %s' % k)
+                        raise BaseException('Duplicate primary key for field: %s' % k)
                     primaryKey = k
                 else:
                     fields.append(k)
         if not primaryKey:
-            raise StandardError('Primary key not found.')
+            raise BaseException('Primary key not found.')
         for k in mappings.keys():
             attrs.pop(k)
         escaped_fields = list(map(lambda f: '`%s`' % f, fields))
@@ -222,7 +229,7 @@ class Model(dict, metaclass=ModelMetaclass):
         args.append(self.getValueOrDefault(self.__primary_key__))
         rows = yield from execute(self.__insert__, args)
         if rows != 1:
-            logging.warn('failed to insert record: affected rows: %s' % rows)
+            logging.warning('failed to insert record: affected rows: %s' % rows)
 
     @asyncio.coroutine
     def update(self):
@@ -230,7 +237,7 @@ class Model(dict, metaclass=ModelMetaclass):
         args.append(self.getValue(self.__primary_key__))
         rows = yield from execute(self.__update__, args)
         if rows != 1:
-            logging.warn('failed to update by primary key: affected rows: %s' % rows)
+            logging.warning('failed to update by primary key: affected rows: %s' % rows)
 
     @asyncio.coroutine
     def remove(self):
